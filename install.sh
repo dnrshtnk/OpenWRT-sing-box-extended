@@ -19,6 +19,25 @@ fail() {
     exit 1
 }
 
+# Function to get installed version
+get_installed_version() {
+    local ver=""
+    if [ -f "$DEST_FILE" ]; then
+        ver=$("$DEST_FILE" version 2>/dev/null | head -n 1 | awk '{print $NF}') || true
+    fi
+    echo "$ver"
+}
+
+# Function to display installed version
+display_installed_version() {
+    local ver=$(get_installed_version)
+    if [ -n "$ver" ]; then
+        printf "  Установленная:   ${Y}%s${N}\n" "$ver"
+    else
+        printf "  Установленная:   ${Y}не установлена${N}\n"
+    fi
+}
+
 READ_TIMEOUT_SUPPORTED="1"
 _READ_TIMEOUT_TEST=$( (read -r -t 0 _read_timeout_test) 2>&1 </dev/null )
 case "$_READ_TIMEOUT_TEST" in
@@ -184,7 +203,6 @@ esac
 CURRENT_VER=""
 if [ -f "$DEST_FILE" ]; then
     CURRENT_VER=$("$DEST_FILE" version 2>/dev/null | head -n 1 | awk '{print $NF}') || true
-    rm -f "$DEST_FILE"
 fi
 
 if [ -z "$GITHUB_TOKEN" ]; then
@@ -196,6 +214,7 @@ GITHUB_TOKEN=$(printf '%s' "$GITHUB_TOKEN" | tr -d ' \t\n\r')
 printf "\n${C}========================================${N}\n"
 printf "${C}  Установщик sing-box extended${N}\n"
 printf "${C}========================================${N}\n"
+display_installed_version
 printf "  Сервис:       ${Y}%s${N}\n" "$SERVICE_NAME"
 printf "  Архитектура:  ${Y}%s${N} -> ${Y}%s${N}\n" "$HOST_ARCH" "$ARCH_SUFFIX"
 if [ -n "$PKG_MANAGER" ]; then
@@ -294,8 +313,40 @@ printf "\n${C}Выбор:${N}\n"
 printf "  Текущая версия:  ${Y}%s${N}\n" "${CURRENT_VER:-не установлена}"
 printf "  Новая версия:    ${Y}%s${N}\n" "$SELECTED_VER"
 
-if [ -n "$CURRENT_VER" ] && [ "$CURRENT_VER" = "$SELECTED_VER" ]; then
-    printf "${Y}[!] Эта версия уже установлена. Будет выполнена переустановка.${N}\n"
+# Delete existing version if present
+if [ -n "$CURRENT_VER" ]; then
+    if [ "$CURRENT_VER" = "$SELECTED_VER" ]; then
+        printf "${Y}[!] Эта версия уже установлена. Будет выполнена переустановка.${N}\n"
+    fi
+    
+    printf "${C}[*] Удаляю текущую версию ${CURRENT_VER} для освобождения места...${N}\n"
+    
+    # Stop service before removing binary
+    printf "${C}[*] Останавливаю сервис ${SERVICE_NAME}...${N}\n"
+    SERVICE_STOPPED="1"
+    service "$SERVICE_NAME" stop >/dev/null 2>&1 || true
+    sleep 2
+    
+    # Remove the binary
+    if [ -f "$DEST_FILE" ]; then
+        rm -f "$DEST_FILE" || fail "Не удалось удалить текущий бинарник $DEST_FILE"
+        printf "${G}[+] Текущий бинарник удалён.${N}\n"
+    fi
+    
+    # If it's a package manager installation, also remove the package
+    if [ "$INSTALL_POLICY" = "apk" ]; then
+        printf "${C}[*] Удаляю пакет ${SERVICE_NAME} через ${PKG_MANAGER}...${N}\n"
+        case "$PKG_MANAGER" in
+            apk)
+                apk del "$SERVICE_NAME" 2>/dev/null || true
+                ;;
+            opkg)
+                opkg remove "$SERVICE_NAME" 2>/dev/null || true
+                ;;
+        esac
+    fi
+    
+    CURRENT_VER=""  # Clear the current version since it's removed
 fi
 
 get_compressed_url_from_assets() {
