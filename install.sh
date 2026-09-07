@@ -184,6 +184,7 @@ esac
 CURRENT_VER=""
 if [ -f "$DEST_FILE" ]; then
     CURRENT_VER=$("$DEST_FILE" version 2>/dev/null | head -n 1 | awk '{print $NF}') || true
+    rm -f "$DEST_FILE"
 fi
 
 if [ -z "$GITHUB_TOKEN" ]; then
